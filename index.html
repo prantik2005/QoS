@@ -560,6 +560,13 @@
                     currentRound = data.currentRound || 1;
                     gameStarted = data.gameStarted || false;
                     
+                    // If the game has started, force the UI to switch for everyone (including clients)
+                    if (gameStarted) {
+                        document.getElementById('mp-lobby-modal').classList.add('hidden');
+                        document.getElementById('menu-overlay').classList.add('hidden');
+                        document.getElementById('game-ui').classList.remove('hidden');
+                    }
+
                     if (mpRole === 'client' && data.showLeaderboard) viewLeaderboard();
                     if (mpRole === 'client' && data.ganduText) showGanduMilestone(data.ganduText, data.winnerText);
                     
