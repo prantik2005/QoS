@@ -546,7 +546,7 @@
             if(!db || !isMultiplayer || !mpRoomCode) return;
             db.collection("rooms").doc(mpRoomCode).set({
                 players, currentRound, gameStarted, ...extraState
-            }, { merge: true });
+            }, { merge: true }).catch(e => console.error("Sync Error:", e));
         }
 
         function listenToRoom() {
@@ -555,29 +555,47 @@
             
             unsubscribeRoom = db.collection("rooms").doc(mpRoomCode).onSnapshot((doc) => {
                 if(doc.exists) {
-                    const data = doc.data();
-                    players = data.players || [];
-                    currentRound = data.currentRound || 1;
-                    gameStarted = data.gameStarted || false;
-                    
-                    // If the game has started, force the UI to switch for everyone (including clients)
-                    if (gameStarted) {
-                        document.getElementById('mp-lobby-modal').classList.add('hidden');
-                        document.getElementById('menu-overlay').classList.add('hidden');
-                        document.getElementById('game-ui').classList.remove('hidden');
-                    }
+                    try {
+                        const data = doc.data();
+                        players = data.players || [];
+                        currentRound = data.currentRound || 1;
+                        gameStarted = data.gameStarted || false;
+                        
+                        // Strictly enforce UI state based on gameStarted flag
+                        if (gameStarted) {
+                            document.getElementById('mp-lobby-modal').classList.add('hidden');
+                            document.getElementById('mp-setup-modal').classList.add('hidden');
+                            document.getElementById('menu-overlay').classList.add('hidden');
+                            document.getElementById('game-ui').classList.remove('hidden');
+                        } else if (mpRole === 'client') {
+                            // Ensure lobby stays visible if not started yet
+                            document.getElementById('game-ui').classList.add('hidden');
+                            document.getElementById('menu-overlay').classList.add('hidden');
+                            document.getElementById('mp-lobby-modal').classList.remove('hidden');
+                        }
 
-                    if (mpRole === 'client' && data.showLeaderboard) viewLeaderboard();
-                    if (mpRole === 'client' && data.ganduText) showGanduMilestone(data.ganduText, data.winnerText);
-                    
-                    renderLobby();
-                    renderGameUI();
-                    
-                    if(mpRole === 'host') checkHostEndRound();
+                        // Strictly enforce popups for clients so they don't get stuck
+                        if (mpRole === 'client') {
+                            if (data.showLeaderboard) viewLeaderboard();
+                            else closeLeaderboard(); // Auto-close if host closes
+
+                            if (data.ganduText) showGanduMilestone(data.ganduText, data.winnerText);
+                            else document.getElementById('milestone-modal').classList.add('hidden');
+                        }
+                        
+                        renderLobby();
+                        renderGameUI();
+                        
+                        if(mpRole === 'host') checkHostEndRound();
+                    } catch (err) {
+                        console.error("UI Render Error during Sync:", err);
+                    }
                 } else if (mpRole === 'client') {
                     alert("Room was closed by the host.");
                     leaveLobby();
                 }
+            }, (error) => {
+                console.error("Firebase Listener Error:", error);
             });
         }
 
@@ -648,13 +666,17 @@
                 players: firebase.firestore.FieldValue.arrayUnion(newPlayer)
             });
             
-            listenToRoom();
-            
             document.getElementById('mp-setup-modal').classList.add('hidden');
-            document.getElementById('mp-lobby-modal').classList.remove('hidden');
-            document.getElementById('mp-display-code').innerText = mpRoomCode;
-            document.getElementById('btn-mp-start').classList.add('hidden');
-            document.getElementById('txt-mp-waiting').classList.remove('hidden');
+            
+            // Only force lobby UI if the game hasn't started yet to prevent race conditions
+            if (!(docSnap.data().gameStarted || false)) {
+                document.getElementById('mp-lobby-modal').classList.remove('hidden');
+                document.getElementById('mp-display-code').innerText = mpRoomCode;
+                document.getElementById('btn-mp-start').classList.add('hidden');
+                document.getElementById('txt-mp-waiting').classList.remove('hidden');
+            }
+
+            listenToRoom(); // Fire up listener AFTER UI structure is settled
         }
 
         function renderLobby() {
@@ -849,8 +871,12 @@
                         }
                     }
 
+                    // Fallbacks in case Firebase drops the suit object during sync
+                    const suitColor = player.suit ? player.suit.color : 'text-neon-cyan drop-shadow-[0_0_5px_#00ffff]';
+                    const suitSymbol = player.suit ? player.suit.symbol : '♠';
+
                     row.innerHTML = `
-                        <div class="absolute -right-4 -top-6 text-8xl opacity-10 ${player.suit.color} pointer-events-none">${player.suit.symbol}</div>
+                        <div class="absolute -right-4 -top-6 text-8xl opacity-10 ${suitColor} pointer-events-none">${suitSymbol}</div>
                         <div class="flex items-center gap-4 w-full sm:w-auto z-10">
                             <span class="text-3xl">${player.avatar}</span>
                             <div>
